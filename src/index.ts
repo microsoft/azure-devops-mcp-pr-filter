@@ -5,19 +5,27 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import * as azdev from "azure-devops-node-api";
-import { AccessToken, AzureCliCredential, ChainedTokenCredential, DefaultAzureCredential, TokenCredential } from "@azure/identity";
+import { getBearerHandler, getPersonalAccessTokenHandler, WebApi } from "azure-devops-node-api";
 import yargs from "yargs";
-import { hideBin } from "yargs/helpers";
 
-import { configurePrompts } from "./prompts.js";
+import { createAuthenticator } from "./auth.js";
+import { logger } from "./logger.js";
+import { getOrgTenant } from "./org-tenants.js";
+//import { configurePrompts } from "./prompts.js";
 import { configureAllTools } from "./tools.js";
 import { UserAgentComposer } from "./useragent.js";
+import { getCliArgs } from "./utils.js";
 import { packageVersion } from "./version.js";
 import { DomainsManager } from "./shared/domains.js";
 
+function isGitHubCodespaceEnv(): boolean {
+  return process.env.CODESPACES === "true" && !!process.env.CODESPACE_NAME;
+}
+
+const defaultAuthenticationType = isGitHubCodespaceEnv() ? "azcli" : "interactive";
+
 // Parse command line arguments using yargs
-const argv = yargs(hideBin(process.argv))
+const argv = yargs(getCliArgs())
   .scriptName("mcp-server-azuredevops")
   .usage("Usage: $0 <organization> [options]")
   .version(packageVersion)
@@ -35,15 +43,20 @@ const argv = yargs(hideBin(process.argv))
     array: true,
     default: "all",
   })
+  .option("authentication", {
+    alias: "a",
+    describe: "Type of authentication to use",
+    type: "string",
+    choices: ["interactive", "azcli", "env", "envvar", "pat"],
+    default: defaultAuthenticationType,
+  })
   .option("tenant", {
     alias: "t",
-    describe: "Azure tenant ID (optional, required for multi-tenant scenarios)",
+    describe: "Azure tenant ID (optional, applied when using 'interactive' and 'azcli' type of authentication)",
     type: "string",
   })
   .help()
   .parseSync();
-
-const tenantId = argv.tenant;
 
 export const orgName = argv.organization as string;
 const orgUrl = "https://dev.azure.com/" + orgName;
@@ -51,31 +64,13 @@ const orgUrl = "https://dev.azure.com/" + orgName;
 const domainsManager = new DomainsManager(argv.domains);
 export const enabledDomains = domainsManager.getEnabledDomains();
 
-async function getAzureDevOpsToken(): Promise<AccessToken> {
-  if (process.env.ADO_MCP_AZURE_TOKEN_CREDENTIALS) {
-    process.env.AZURE_TOKEN_CREDENTIALS = process.env.ADO_MCP_AZURE_TOKEN_CREDENTIALS;
-  } else {
-    process.env.AZURE_TOKEN_CREDENTIALS = "dev";
-  }
-  let credential: TokenCredential = new DefaultAzureCredential(); // CodeQL [SM05138] resolved by explicitly setting AZURE_TOKEN_CREDENTIALS
-  if (tenantId) {
-    // Use Azure CLI credential if tenantId is provided for multi-tenant scenarios
-    const azureCliCredential = new AzureCliCredential({ tenantId });
-    credential = new ChainedTokenCredential(azureCliCredential, credential);
-  }
-
-  const token = await credential.getToken("499b84ac-1321-427f-aa17-267ca6975798/.default");
-  if (!token) {
-    throw new Error("Failed to obtain Azure DevOps token. Ensure you have Azure CLI logged in or another token source setup correctly.");
-  }
-  return token;
-}
-
-function getAzureDevOpsClient(userAgentComposer: UserAgentComposer): () => Promise<azdev.WebApi> {
+function getAzureDevOpsClient(getAzureDevOpsToken: () => Promise<string>, userAgentComposer: UserAgentComposer, authType: string): () => Promise<WebApi> {
   return async () => {
-    const token = await getAzureDevOpsToken();
-    const authHandler = azdev.getBearerHandler(token.token);
-    const connection = new azdev.WebApi(orgUrl, authHandler, undefined, {
+    const accessToken = await getAzureDevOpsToken();
+    // For pat, accessToken is base64("{email}:{token}"). Decode to extract the token part,
+    // since getPersonalAccessTokenHandler prepends ":" internally and just needs the raw token.
+    const authHandler = authType === "pat" ? getPersonalAccessTokenHandler(Buffer.from(accessToken, "base64").toString("utf8").split(":").slice(1).join(":")) : getBearerHandler(accessToken);
+    const connection = new WebApi(orgUrl, authHandler, undefined, {
       productName: "AzureDevOps.MCP",
       productVersion: packageVersion,
       userAgent: userAgentComposer.userAgent,
@@ -85,25 +80,61 @@ function getAzureDevOpsClient(userAgentComposer: UserAgentComposer): () => Promi
 }
 
 async function main() {
+  logger.info("Starting Azure DevOps MCP Server", {
+    organization: orgName,
+    organizationUrl: orgUrl,
+    authentication: argv.authentication,
+    tenant: argv.tenant,
+    domains: argv.domains,
+    enabledDomains: Array.from(enabledDomains),
+    version: packageVersion,
+    isCodespace: isGitHubCodespaceEnv(),
+  });
+
   const server = new McpServer({
     name: "Azure DevOps MCP Server",
     version: packageVersion,
+    icons: [
+      {
+        src: "https://cdn.vsassets.io/content/icons/favicon.ico",
+      },
+    ],
   });
 
   const userAgentComposer = new UserAgentComposer(packageVersion);
   server.server.oninitialized = () => {
     userAgentComposer.appendMcpClientInfo(server.server.getClientVersion());
   };
+  const tenantId = argv.tenant ?? (await getOrgTenant(orgName));
+  const authenticator = createAuthenticator(argv.authentication, tenantId);
 
-  configurePrompts(server);
+  if (argv.authentication === "pat") {
+    const basicValue = await authenticator();
+    // basicValue is already base64("{email}:{token}") — use it directly in the Authorization header
+    const _originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.headers) {
+        const headers = new Headers(init.headers as HeadersInit);
+        if (headers.get("Authorization")?.startsWith("Bearer ")) {
+          headers.set("Authorization", `Basic ${basicValue}`);
+          init = { ...init, headers };
+        }
+      }
+      return _originalFetch(input, init);
+    };
+    logger.debug("PAT mode: global fetch interceptor installed to rewrite Bearer -> Basic auth headers");
+  }
 
-  configureAllTools(server, getAzureDevOpsToken, getAzureDevOpsClient(userAgentComposer), () => userAgentComposer.userAgent, enabledDomains);
+  // removing prompts until further notice
+  // configurePrompts(server);
+
+  configureAllTools(server, authenticator, getAzureDevOpsClient(authenticator, userAgentComposer, argv.authentication), () => userAgentComposer.userAgent, enabledDomains);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
 
 main().catch((error) => {
-  console.error("Fatal error in main():", error);
+  logger.error("Fatal error in main():", error);
   process.exit(1);
 });

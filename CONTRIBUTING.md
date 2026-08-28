@@ -28,11 +28,40 @@ For reference, see [this example of a well-formed issue](https://github.com/micr
 
 ## 👩‍💻 Writing code
 
-We are accepting a limited number of pull requests during the public preview phase. If you notice something that should be changed or added, please create an issue first and provide details. Once reviewed, and if it makes sense to proceed, we will respond with a 👍.
+We’re currently accepting a limited number of pull requests, provided they follow the established process and remain simple in scope. If you notice something that should be changed or added, please **create an issue first** and provide details. Once reviewed, and if it makes sense to proceed, we will respond with a 👍.
 
 Please include tests with your pull request. Pull requests will not be accepted until all relevant tests are updated and passing.
 
 Code formatting is enforced by CI checks. Run `npm run format` to ensure your changes comply with the rules.
+
+### Testing
+
+This project uses Jest with `ts-jest` for testing TypeScript code. Tests are located in the `test/` directory and mirror the structure of the `src/` directory.
+
+#### Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test file
+npm test test/src/utils.test.ts
+
+# Run tests with coverage report
+npm test -- --coverage
+```
+
+#### Jest Configuration
+
+The project uses a modern Jest + ts-jest configuration:
+
+- **jest.config.cjs**: Main Jest configuration using the modern transform array syntax
+- **tsconfig.jest.json**: Test-specific TypeScript configuration that extends the base `tsconfig.json`
+
+Key features of our test configuration:
+
+- **isolatedModules: true** - Enabled in `tsconfig.jest.json` to eliminate ts-jest "hybrid module kind" warnings. This ensures each file is transpiled independently, which is more performant and aligns with how `ts-jest` processes files.
+- **CommonJS modules** - Tests use CommonJS (`module: "CommonJS"`) to ensure compatibility with Jest's test environment.
 
 ## 🖊️ Coding style
 
@@ -41,6 +70,34 @@ Follow the established patterns and styles in the repository. If you have sugges
 ## 📑 Documentation
 
 Update relevant documentation (e.g., README, existing code comments) to reflect new or altered functionality. Well-documented changes enable reviewers and future contributors to quickly understand the rationale and intended use of your code.
+
+## 🐛 Debugging
+
+MCP servers use `stdio` to communicate with the client. Logs must never appear in `stdout` (which would break the protocol contract) and should be directed to `stderr` instead.
+
+All `winston` logs in this project are automatically redirected to `stderr`. To view debug logs:
+
+1. Set the `LOG_LEVEL` environment variable in your MCP client configuration (e.g., in your `mcp.json` file):
+
+```json
+{
+  "mcpServers": {
+    "azure-devops": {
+      "command": "node",
+      "args": ["path/to/dist/index.js"],
+      "env": {
+        "LOG_LEVEL": "debug"
+      }
+    }
+  }
+}
+```
+
+2. Alternatively, set `LOG_LEVEL` as an environment variable in your shell before starting the MCP client.
+
+Available log levels: `error`, `warn`, `info`, `debug`.
+
+You can examine these logs at the `output` panel under `MCP:ado` (or whatever name you used in `mcp.json` file).
 
 ## 🤝 Code of conduct
 

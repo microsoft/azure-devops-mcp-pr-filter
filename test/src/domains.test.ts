@@ -2,12 +2,22 @@
 // Licensed under the MIT License.
 
 import { DomainsManager } from "../../src/shared/domains";
+import { logger } from "../../src/logger";
+
+jest.mock("../../src/logger.js", () => ({
+  logger: {
+    info: jest.fn(),
+    error: jest.fn(),
+    warn: jest.fn(),
+    debug: jest.fn(),
+  },
+}));
 
 describe("DomainsManager: backward compatibility and domain enabling", () => {
   let errorSpy: jest.SpyInstance;
 
   beforeEach(() => {
-    errorSpy = jest.spyOn(console, "error").mockImplementation();
+    errorSpy = jest.spyOn(logger, "error").mockImplementation();
   });
 
   afterEach(() => {
@@ -154,8 +164,8 @@ describe("DomainsManager: backward compatibility and domain enabling", () => {
     it("returns the full list of available domains", () => {
       const availableDomains = DomainsManager.getAvailableDomains();
 
-      expect(availableDomains).toEqual(["advanced-security", "pipelines", "core", "repositories", "search", "test-plans", "wiki", "work", "work-items"]);
-      expect(availableDomains.length).toBe(9);
+      expect(availableDomains).toEqual(["advanced-security", "pipelines", "core", "repositories", "search", "test-plans", "wiki", "work", "work-items", "mcp-apps"]);
+      expect(availableDomains.length).toBe(10);
     });
   });
 
@@ -231,14 +241,14 @@ describe("DomainsManager: backward compatibility and domain enabling", () => {
   });
 
   describe("parseDomainsInput static method", () => {
-    it("returns empty array when no input is provided", () => {
+    it("returns 'all' when no input is provided", () => {
       const result = DomainsManager.parseDomainsInput();
-      expect(result).toEqual([]);
+      expect(result).toEqual(["all"]);
     });
 
-    it("returns empty array when undefined is provided", () => {
+    it("returns 'all' array when undefined is provided", () => {
       const result = DomainsManager.parseDomainsInput(undefined);
-      expect(result).toEqual([]);
+      expect(result).toEqual(["all"]);
     });
 
     it("parses comma-separated string input", () => {
@@ -322,6 +332,26 @@ describe("DomainsManager: backward compatibility and domain enabling", () => {
       const manager = new DomainsManager("repositories,all,core");
       const enabledDomains = manager.getEnabledDomains();
       expect(enabledDomains.size).toBe(9); // Should enable all because 'all' is present
+    });
+  });
+
+  describe("edge empty string cases for enabling all domains", () => {
+    it("when an empty array is passed", () => {
+      const manager = new DomainsManager([]);
+      const enabledDomains = manager.getEnabledDomains();
+      expect(enabledDomains.size).toBe(9);
+    });
+
+    it("when a string with only a break line is passed", () => {
+      const manager = new DomainsManager("\n");
+      const enabledDomains = manager.getEnabledDomains();
+      expect(enabledDomains.size).toBe(9);
+    });
+
+    it("when an empty string is passed", () => {
+      const manager = new DomainsManager("");
+      const enabledDomains = manager.getEnabledDomains();
+      expect(enabledDomains.size).toBe(9);
     });
   });
 });

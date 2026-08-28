@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { AccessToken } from "@azure/identity";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebApi } from "azure-devops-node-api";
 import { IGitApi } from "azure-devops-node-api/GitApi.js";
@@ -17,19 +16,22 @@ const SEARCH_TOOLS = {
   search_workitem: "search_workitem",
 };
 
-function configureSearchTools(server: McpServer, tokenProvider: () => Promise<AccessToken>, connectionProvider: () => Promise<WebApi>, userAgentProvider: () => string) {
+function configureSearchTools(server: McpServer, tokenProvider: () => Promise<string>, connectionProvider: () => Promise<WebApi>, userAgentProvider: () => string) {
   server.tool(
     SEARCH_TOOLS.search_code,
     "Search Azure DevOps Repositories for a given search text",
     {
       searchText: z.string().describe("Keywords to search for in code repositories"),
-      project: z.array(z.string()).optional().describe("Filter by projects"),
+      project: z
+        .union([z.string().transform((value) => [value]), z.array(z.string())])
+        .optional()
+        .describe("Filter by projects"),
       repository: z.array(z.string()).optional().describe("Filter by repositories"),
       path: z.array(z.string()).optional().describe("Filter by paths"),
       branch: z.array(z.string()).optional().describe("Filter by branches"),
       includeFacets: z.boolean().default(false).describe("Include facets in the search results"),
-      skip: z.number().default(0).describe("Number of results to skip"),
-      top: z.number().default(5).describe("Maximum number of results to return"),
+      skip: z.coerce.number().default(0).describe("Number of results to skip"),
+      top: z.coerce.number().default(5).describe("Maximum number of results to return"),
     },
     async ({ searchText, project, repository, path, branch, includeFacets, skip, top }) => {
       const accessToken = await tokenProvider();
@@ -57,7 +59,7 @@ function configureSearchTools(server: McpServer, tokenProvider: () => Promise<Ac
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${accessToken.token}`,
+          "Authorization": `Bearer ${accessToken}`,
           "User-Agent": userAgentProvider(),
         },
         body: JSON.stringify(requestBody),
@@ -87,8 +89,8 @@ function configureSearchTools(server: McpServer, tokenProvider: () => Promise<Ac
       project: z.array(z.string()).optional().describe("Filter by projects"),
       wiki: z.array(z.string()).optional().describe("Filter by wiki names"),
       includeFacets: z.boolean().default(false).describe("Include facets in the search results"),
-      skip: z.number().default(0).describe("Number of results to skip"),
-      top: z.number().default(10).describe("Maximum number of results to return"),
+      skip: z.coerce.number().default(0).describe("Number of results to skip"),
+      top: z.coerce.number().default(10).describe("Maximum number of results to return"),
     },
     async ({ searchText, project, wiki, includeFacets, skip, top }) => {
       const accessToken = await tokenProvider();
@@ -113,7 +115,7 @@ function configureSearchTools(server: McpServer, tokenProvider: () => Promise<Ac
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${accessToken.token}`,
+          "Authorization": `Bearer ${accessToken}`,
           "User-Agent": userAgentProvider(),
         },
         body: JSON.stringify(requestBody),
@@ -141,8 +143,8 @@ function configureSearchTools(server: McpServer, tokenProvider: () => Promise<Ac
       state: z.array(z.string()).optional().describe("Filter by work item states"),
       assignedTo: z.array(z.string()).optional().describe("Filter by assigned to users"),
       includeFacets: z.boolean().default(false).describe("Include facets in the search results"),
-      skip: z.number().default(0).describe("Number of results to skip for pagination"),
-      top: z.number().default(10).describe("Number of results to return"),
+      skip: z.coerce.number().default(0).describe("Number of results to skip for pagination"),
+      top: z.coerce.number().default(10).describe("Number of results to return"),
     },
     async ({ searchText, project, areaPath, workItemType, state, assignedTo, includeFacets, skip, top }) => {
       const accessToken = await tokenProvider();
@@ -170,7 +172,7 @@ function configureSearchTools(server: McpServer, tokenProvider: () => Promise<Ac
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${accessToken.token}`,
+          "Authorization": `Bearer ${accessToken}`,
           "User-Agent": userAgentProvider(),
         },
         body: JSON.stringify(requestBody),

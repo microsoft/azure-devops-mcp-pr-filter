@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import { logger } from "../logger.js";
+
 /**
  * Available Azure DevOps MCP domains
  */
@@ -8,12 +10,14 @@ export enum Domain {
   ADVANCED_SECURITY = "advanced-security",
   PIPELINES = "pipelines",
   CORE = "core",
+  NOTIFICATIONS = "notifications",
   REPOSITORIES = "repositories",
   SEARCH = "search",
   TEST_PLANS = "test-plans",
   WIKI = "wiki",
   WORK = "work",
   WORK_ITEMS = "work-items",
+  MCP_APPS = "mcp-apps",
 }
 
 export const ALL_DOMAINS = "all";
@@ -78,7 +82,11 @@ export class DomainsManager {
       } else if (domain === ALL_DOMAINS) {
         this.enableAllDomains();
       } else {
-        console.error(`Error: Specified invalid domain '${domain}'. Please specify exactly as available domains: ${Object.values(Domain).join(", ")}`);
+        logger.error(
+          `Error: Specified invalid domain '${domain}'. Please specify exactly as available domains: ${Object.values(Domain)
+            .filter((d) => d !== Domain.MCP_APPS)
+            .join(", ")}`
+        );
       }
     });
 
@@ -88,7 +96,9 @@ export class DomainsManager {
   }
 
   private enableAllDomains(): void {
-    Object.values(Domain).forEach((domain) => this.enabledDomains.add(domain));
+    Object.values(Domain)
+      .filter((domain) => domain !== Domain.MCP_APPS)
+      .forEach((domain) => this.enabledDomains.add(domain));
   }
 
   /**
@@ -122,8 +132,8 @@ export class DomainsManager {
    * @returns Normalized array of domain strings
    */
   public static parseDomainsInput(domainsInput?: string | string[]): string[] {
-    if (!domainsInput) {
-      return [];
+    if (!domainsInput || this.isEmptyDomainsInput(domainsInput)) {
+      return ["all"];
     }
 
     if (typeof domainsInput === "string") {
@@ -131,5 +141,11 @@ export class DomainsManager {
     }
 
     return domainsInput.map((d) => d.trim().toLowerCase());
+  }
+
+  private static isEmptyDomainsInput(domainsInput?: string | string[]): boolean {
+    if (typeof domainsInput === "string" && domainsInput.trim() === "") return true;
+    if (Array.isArray(domainsInput) && domainsInput.length === 0) return true;
+    return false;
   }
 }
